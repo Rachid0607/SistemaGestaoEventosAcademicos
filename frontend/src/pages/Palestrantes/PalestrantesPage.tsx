@@ -266,7 +266,7 @@ export function PalestrantesPage() {
             <option value="APROVADO">Aprovados</option>
           </select>
         </div>
-        <table className="table">
+        <table className="table tabela-responsiva">
           <thead>
             <tr>
               <th>Nome</th>

@@ -211,7 +211,7 @@ export function EquipePage() {
             <option value="SECRETARIA">Secretarias</option>
           </select>
         </div>
-        <table className="table">
+        <table className="table tabela-responsiva">
           <thead>
             <tr>
               <th>Nome</th>

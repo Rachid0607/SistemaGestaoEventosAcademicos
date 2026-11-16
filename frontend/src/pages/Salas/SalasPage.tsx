@@ -144,7 +144,7 @@ export function SalasPage() {
             ))}
           </select>
         </div>
-        <table className="table">
+        <table className="table tabela-responsiva">
           <thead>
             <tr>
               <th>Sala</th>

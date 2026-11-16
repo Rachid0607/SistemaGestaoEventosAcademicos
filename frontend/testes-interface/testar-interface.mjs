@@ -1532,6 +1532,54 @@ try {
     (await invalido(page, "#novaSenha")) && (await temTexto(page, "A senha deve ter de 8 a 64 caracteres")),
   );
 
+  titulo("Celular: tabelas viram cartões e nenhuma tela rola de lado");
+  {
+    // a pagina nunca fica mais larga que a janela (so o menu de abas rola de lado, dentro dele mesmo)
+    const semRolagemLateral = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+    const exibicaoDaLinha = () =>
+      page.evaluate(() => {
+        const linha = document.querySelector("table.tabela-responsiva tbody tr");
+        return linha ? getComputedStyle(linha).display : "sem tabela";
+      });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await entrar(page, admin.email, admin.senha);
+    for (const [rota, nome] of [
+      ["/inscricoes", "Inscrições"],
+      ["/certificados", "Certificados"],
+      ["/participantes", "Participantes"],
+      ["/auditoria", "Auditoria"],
+    ]) {
+      await page.goto(`${APP}${rota}`);
+      // espera uma linha de dados (o "Carregando…" ocupa a linha toda, sem rotulo)
+      await page.locator("table.tabela-responsiva tbody td:not([colspan])").first().waitFor({ timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      const exibicao = await exibicaoDaLinha();
+      checar(`375 px, ${nome}: sem rolagem lateral e cada linha é um cartão`, (await semRolagemLateral()) && exibicao === "block", exibicao);
+    }
+    const rotuloDaCelula = await page.evaluate(() => document.querySelector("table.tabela-responsiva tbody td:not([colspan])")?.getAttribute("data-label") ?? "");
+    checar("cada campo do cartão leva o rótulo da coluna", rotuloDaCelula.length > 0, rotuloDaCelula);
+    await sair(page);
+
+    await entrar(page, emailAluno, SENHA_ALUNA);
+    await page.goto(`${APP}/eventos`);
+    await page.locator(".evento-cartao").first().waitFor({ timeout: 10000 }).catch(() => {});
+    checar("375 px, Eventos do aluno: sem rolagem lateral, com os eventos em cartões", (await semRolagemLateral()) && (await page.locator(".evento-cartao").count()) > 0);
+    await sair(page);
+
+    // no computador a tabela continua tabela
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await entrar(page, admin.email, admin.senha);
+    await page.goto(`${APP}/inscricoes`);
+    await page.locator("table.tabela-responsiva tbody tr").first().waitFor({ timeout: 10000 }).catch(() => {});
+    const noComputador = await exibicaoDaLinha();
+    checar(
+      "1280 px: a tabela continua igual (linhas de tabela, cabeçalho visível)",
+      noComputador === "table-row" && (await page.locator("table.tabela-responsiva thead").first().isVisible()),
+      noComputador,
+    );
+    await sair(page);
+  }
+
   titulo("Console do navegador");
   checar("nenhum erro de JavaScript nas telas", errosDoNavegador.length === 0, errosDoNavegador.join(" | "));
 } catch (erro) {

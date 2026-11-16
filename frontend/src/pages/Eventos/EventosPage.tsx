@@ -586,7 +586,7 @@ function EventosEquipe() {
           {resultados?.temMais && (
             <p className="form-hint">Mostrando os {resultados.limite} eventos mais recentes. Refine a busca para encontrar outros.</p>
           )}
-          <table className="table">
+          <table className="table tabela-responsiva">
             <thead>
               <tr>
                 <th>Data/Horário</th>

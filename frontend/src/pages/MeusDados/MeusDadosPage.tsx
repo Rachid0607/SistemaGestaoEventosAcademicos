@@ -29,7 +29,7 @@ function Secao({ titulo, colunas, vazio, linhas }: { titulo: string; colunas: st
       {linhas.length === 0 ? (
         <p className="empty-cell">{vazio}</p>
       ) : (
-        <table className="table">
+        <table className="table tabela-responsiva">
           <thead>
             <tr>
               {colunas.map((c) => (

@@ -124,7 +124,7 @@ export function PoliticaDePrivacidadePage() {
         </p>
         <p>Não coletamos CPF, endereço, data de nascimento, foto ou dados de saúde.</p>
         <h2>3. Para que usamos cada dado</h2>
-        <table className="legal-tabela">
+        <table className="legal-tabela tabela-responsiva">
           <thead>
             <tr>
               <th>Dado</th>

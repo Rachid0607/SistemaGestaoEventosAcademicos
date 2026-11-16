@@ -194,7 +194,7 @@ export function FeedbackPage() {
           </div>
 
           <div className="card">
-            <table className="table">
+            <table className="table tabela-responsiva">
               <thead>
                 <tr>
                   {isEquipe && <th>Participante</th>}

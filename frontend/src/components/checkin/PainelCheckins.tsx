@@ -92,7 +92,7 @@ export function PainelCheckins({ eventoId, onAlterado }: { eventoId: string; onA
           </button>
         )}
       </div>
-      <table className="table">
+      <table className="table tabela-responsiva">
         <thead>
           <tr>
             <th>Aluno</th>
@@ -145,7 +145,7 @@ export function PainelCheckins({ eventoId, onAlterado }: { eventoId: string; onA
       </table>
 
       <h3 style={{ marginTop: 20 }}>Já decididos ({painel.decididos.length})</h3>
-      <table className="table">
+      <table className="table tabela-responsiva">
         <thead>
           <tr>
             <th>Aluno</th>

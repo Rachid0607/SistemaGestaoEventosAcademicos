@@ -223,7 +223,7 @@ export function AuditoriaPage() {
         {periodoInvalido && <p className="form-error">A data inicial não pode ser posterior à data final.</p>}
 
         <div style={{ overflowX: "auto" }}>
-          <table className="table">
+          <table className="table tabela-responsiva">
             <thead>
               <tr>
                 <th>Data/hora</th>

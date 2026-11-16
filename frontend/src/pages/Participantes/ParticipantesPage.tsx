@@ -174,7 +174,7 @@ export function ParticipantesPage() {
           onChange={(e) => setBusca(e.target.value)}
         />
         <div className="table-scroll">
-          <table className="table">
+          <table className="table tabela-responsiva">
             <thead>
               <tr>
                 <th>Nome</th>

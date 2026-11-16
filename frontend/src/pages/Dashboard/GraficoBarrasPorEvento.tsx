@@ -84,7 +84,7 @@ export function GraficoBarrasPorEvento({ eventos, total, rotuloTotal, segmentos,
       <details className="grafico-tabela">
         <summary>Ver dados em tabela</summary>
         <div className="table-scroll">
-          <table className="table">
+          <table className="table tabela-responsiva">
             <thead>
               <tr>
                 <th>Evento</th>

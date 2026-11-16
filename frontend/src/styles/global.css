@@ -2221,3 +2221,138 @@ h1, h2, h3 {
 .contador-caracteres.contador-abaixo {
   color: var(--red-600);
 }
+
+/* ---------- telas estreitas (ate 900px): tabelas viram cartoes e nada alarga a pagina ----------
+   .tabela-responsiva vai em toda tabela do sistema. Cada linha do corpo vira um cartao, com um campo por linha no
+   formato "Rotulo: valor": o rotulo vem do cabecalho da coluna, copiado para o data-label de cada celula por
+   utils/tabelaResponsiva.ts. O cabecalho some (cada campo ja leva o rotulo), as acoes vao para o fim do
+   cartao com 44px de altura de toque e os badges ficam com as mesmas cores. Acima de 900px nada muda */
+@media (max-width: 900px) {
+  /* nenhuma tela rola de lado: so o menu de abas (que ja rola sozinho) */
+  .app-shell,
+  .content {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .content {
+    overflow-wrap: anywhere;
+  }
+
+  .topbar {
+    height: auto;
+    min-height: 60px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 16px;
+  }
+
+  .brand-title {
+    font-size: 15px;
+  }
+
+  .page-header {
+    flex-wrap: wrap;
+  }
+
+  /* filtros e formularios do topo das telas: um campo por linha, na largura toda */
+  .filtros-linha > *,
+  .field-row > .field {
+    flex: 1 1 100%;
+    min-width: 0 !important;
+    max-width: 100%;
+  }
+
+  .filtros-linha select,
+  .field-row select,
+  .field-row input,
+  .search-input {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* a tabela vira lista de cartoes: nada de largura minima nem rolagem lateral dentro do card */
+  .table.tabela-responsiva,
+  .legal-tabela.tabela-responsiva {
+    min-width: 0;
+  }
+
+  .table-scroll:has(> .tabela-responsiva) {
+    overflow-x: visible;
+  }
+
+  .tabela-responsiva,
+  .tabela-responsiva tbody,
+  .tabela-responsiva tr,
+  .tabela-responsiva td {
+    display: block;
+    width: 100%;
+  }
+
+  /* o rotulo de cada campo ja sai no proprio cartao (data-label) */
+  .tabela-responsiva thead {
+    display: none;
+  }
+
+  .tabela-responsiva tbody tr {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    background: #ffffff;
+  }
+
+  .tabela-responsiva tbody tr:hover {
+    background: #ffffff;
+  }
+
+  .tabela-responsiva td {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 6px;
+    border: 0;
+    padding: 6px 0;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .tabela-responsiva td[data-label]:not([data-label=""])::before {
+    content: attr(data-label) ":";
+    font-weight: 600;
+    color: var(--gray-500);
+  }
+
+  .tabela-responsiva td.truncate {
+    max-width: none;
+    overflow: visible;
+  }
+
+  /* acoes no fim do cartao, com area de toque de 44px */
+  .tabela-responsiva td.table-actions {
+    justify-content: flex-start;
+    gap: 8px;
+    margin-top: 6px;
+    padding-top: 10px;
+    border-top: 1px solid var(--gray-100);
+  }
+
+  .tabela-responsiva td.table-actions::before {
+    content: none;
+  }
+
+  .tabela-responsiva td.table-actions:empty {
+    display: none;
+  }
+
+  .tabela-responsiva td.table-actions .btn {
+    min-height: 44px;
+    white-space: normal;
+  }
+
+  /* aviso de lista vazia (celula que ocupa a linha toda) */
+  .tabela-responsiva td.empty-cell {
+    justify-content: center;
+    text-align: center;
+  }
+}

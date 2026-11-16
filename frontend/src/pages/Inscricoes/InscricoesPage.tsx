@@ -240,7 +240,7 @@ export function InscricoesPage() {
           </label>
         </div>
 
-        <table className="table">
+        <table className="table tabela-responsiva">
           <thead>
             <tr>
               <th>Participante</th>
