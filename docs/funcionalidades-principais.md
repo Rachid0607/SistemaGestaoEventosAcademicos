@@ -198,6 +198,16 @@ Permitir que a secretaria bloqueie o uso do sistema por um aluno (uso indevido, 
 - **O que acontece:** o evento guarda quando, o motivo e quem cancelou; a proposta de alteração pendente é encerrada como recusada ("Evento cancelado"); as inscrições ficam (histórico do aluno); a sala fica livre no horário. Cada inscrito e o professor responsável recebem o e-mail "Evento cancelado: <título>" com o cartão do evento, o motivo e o botão para os eventos abertos. A auditoria registra o cancelamento e quantos foram avisados, sem o motivo.
 - **Depois:** o evento aparece com a etiqueta **Cancelado** e o título riscado no calendário (para a equipe, com o motivo, quem cancelou e quando; para o professor dono, com o motivo); para o aluno, sai de "Abertas" e fica em "Inscritas" e "Todas" com a etiqueta e o motivo, sem nenhum botão. Ninguém mais se inscreve, cancela inscrição, pede ou decide check-in, responde o questionário, emite certificado, avalia, edita ou exclui o evento (`409` "Este evento foi cancelado."). O aluno pode se inscrever noutro evento no mesmo horário. O Dashboard não conta o evento cancelado (o indicador de eventos diz quantos ficaram de fora).
 
+## 10. Data do evento, telas no celular e correções da revisão final
+
+- **Evento só no futuro (14/11/2026):** ninguém cria evento, nem muda o horário de um, para uma data e horário que já passaram; a tela marca o erro no campo Data/Horário e o calendário do novo evento não oferece datas passadas. Desde 16/11/2026, aprovar ou reenviar um evento cujo horário de início já passou também é recusado (`409`).
+- **Celular (16/11/2026):** em telas de até 900 px, cada linha das tabelas vira um cartão empilhado, com um campo por linha no formato "Rótulo: valor" (o rótulo vem do cabeçalho da coluna, por `utils/tabelaResponsiva.ts`) e as ações no fim do cartão, com área de toque de 44 px. Nenhuma tela rola de lado; só o menu de abas. Acima de 900 px nada muda.
+- **Correções da revisão final (16/11/2026):**
+  - a busca de alunos da inscrição manual devolve ao professor só nome e RGM (sem e-mail nem motivo de inativação);
+  - a última vaga não é mais disputada: a contagem e a criação da inscrição ficam numa transação com o evento travado, e a segunda inscrição simultânea recebe "Evento sem vagas disponíveis.";
+  - o questionário não aceita uma 3ª tentativa nem com dois envios ao mesmo tempo;
+  - nos avisos por e-mail de cancelamento e de alteração de evento, a auditoria é gravada antes e os e-mails saem em lotes paralelos de 10, sem que a falha de um interrompa os outros.
+
 ---
 
 ## Contas de demonstração

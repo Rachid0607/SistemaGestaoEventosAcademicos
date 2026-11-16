@@ -10,11 +10,11 @@ verificação de todos os requisitos funcionais está em
 
 ## Testes automatizados (banco de desenvolvimento `SGEA_dev`)
 
-| Teste | Comando | Resultado em 13/11/2026 |
+| Teste | Comando | Resultado em 16/11/2026 |
 |---|---|---|
-| Requisitos pela API | `cd backend && npx tsx scripts/testar-requisitos.ts` | **652/652** verificações |
+| Requisitos pela API | `cd backend && npx tsx scripts/testar-requisitos.ts` | **660/660** verificações |
 | 2FA pela API | `cd backend && npx tsx scripts/testar-2fa.ts` | **55/55** |
-| Interface com navegador de verdade | passo a passo no topo de `frontend/testes-interface/testar-interface.mjs` (rodado no Microsoft Edge, numa cópia com `channel: "msedge"`) | **224/224** |
+| Interface com navegador de verdade | passo a passo no topo de `frontend/testes-interface/testar-interface.mjs` (rodado no Microsoft Edge, numa cópia com `channel: "msedge"`) | **231/231** |
 | Demonstração do hash de senha | `cd backend && npx tsx scripts/demonstrar-hash-senha.ts` | ver `07`, "Formato do hash de senha" |
 | Carga de demonstração | `cd backend && npx tsx scripts/carga-demonstracao.ts --aplicar` | 46 s; conferência no banco abaixo |
 | E-mails repetidos (só leitura) | `cd backend && npx tsx scripts/verificar-emails-duplicados.ts` | 1.154 contas, nenhum e-mail repetido nem fora do padrão |

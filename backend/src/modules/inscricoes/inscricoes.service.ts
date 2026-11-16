@@ -143,6 +143,22 @@ export async function garantirSemConflitoDeHorario(
   throw AppError.conflito("CONFLITO_DE_HORARIO", mensagem);
 }
 
+// cria a inscricao so se ainda houver vaga. A contagem e a criacao ficam numa transacao com a linha do evento
+// travada (SELECT ... FOR UPDATE): duas inscricoes ao mesmo tempo na ultima vaga esperam uma pela outra, e a
+// segunda ja ve a vaga ocupada (EVENTO_LOTADO). A contagem tambem e uma leitura com trava: no TiDB a leitura comum
+// enxerga a foto do inicio da transacao (de antes de a primeira gravar), e a leitura com trava enxerga o mais recente.
+// Usada pela autoinscricao do aluno e pela inscricao manual
+export async function criarInscricaoComVaga(eventoId: string, participanteId: string, capacidade: number) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM eventos WHERE id = ${eventoId} FOR UPDATE`;
+    const ocupadas = (await tx.$queryRaw<{ id: string }[]>`SELECT id FROM inscricoes WHERE eventoId = ${eventoId} FOR UPDATE`).length;
+    if (ocupadas >= capacidade) {
+      throw AppError.conflito("EVENTO_LOTADO", "Evento sem vagas disponíveis.");
+    }
+    return tx.inscricao.create({ data: { id: randomUUID(), participanteId, eventoId, statusPresenca: "PENDENTE" } });
+  });
+}
+
 // inscricao manual feita pela equipe (qualquer evento) ou pelo professor (so nos eventos dele: 403 nos outros), checa
 // duplicidade, horario e vaga.
 // Evento que nao esta APROVADO nao aceita inscricao
@@ -172,14 +188,8 @@ async function criarManual(dados: InscricaoInput, ator: Ator) {
   if (jaInscrito) throw AppError.conflito("JA_INSCRITO", "Este participante já está inscrito neste evento.");
   await garantirSemConflitoDeHorario(dados.participanteId, evento!, "EQUIPE");
 
-  const ocupadas = await prisma.inscricao.count({ where: { eventoId: dados.eventoId } });
-  if (ocupadas >= evento!.sala.capacidade) {
-    throw AppError.conflito("EVENTO_LOTADO", "Evento sem vagas disponíveis.");
-  }
-
-  const inscricao = await prisma.inscricao.create({
-    data: { id: randomUUID(), participanteId: dados.participanteId, eventoId: dados.eventoId, statusPresenca: "PENDENTE" },
-  });
+  // vaga conferida e inscricao criada juntas, com o evento travado (ultima vaga disputada)
+  const inscricao = await criarInscricaoComVaga(dados.eventoId, dados.participanteId, evento!.sala.capacidade);
   const quem = descreverQuem(ator.perfil);
   await registrarAuditoria(
     ator.id,

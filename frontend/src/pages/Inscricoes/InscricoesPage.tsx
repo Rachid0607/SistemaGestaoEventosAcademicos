@@ -350,7 +350,7 @@ export function InscricoesPage() {
                       {p.ativo === false && <Badge tone="red">Inativo</Badge>}
                     </div>
                     <div className="simple-list-sub">
-                      {p.email} · RGM {p.rgm}
+                      {p.email ? `${p.email} · ` : ""}RGM {p.rgm}
                     </div>
                   </li>
                 ))}

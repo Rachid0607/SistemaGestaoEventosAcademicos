@@ -611,6 +611,19 @@ valores que não vieram no corpo são os já gravados).
 
 Aluno chamando POST/PUT/DELETE cai em `403 ACESSO_NEGADO`.
 
+**Evento só com data e horário no futuro (desde 14/11/2026, commit
+`3ac6873`):** nenhum perfil cria evento (`POST`) nem muda o horário de um
+(`PUT` com `horario`) para uma data e horário que já passaram: `422
+VALIDACAO` com o erro no campo `horario` ("A data e o horário do evento
+precisam ser no futuro."). Editar sem mudar o horário continua valendo (para
+corrigir o título de um evento em andamento). Pelo mesmo motivo, desde
+16/11/2026 `POST /api/eventos/{id}/aprovar` e `POST /api/eventos/{id}/reenviar`
+recusam evento cujo horário de início já passou: `409 EVENTO_JA_INICIADO`
+("Não é possível aprovar: o horário de início deste evento já passou. Recuse-o
+para o professor ajustar a data." / "Não é possível reenviar: o horário de
+início deste evento já passou. Altere a data e o horário antes de
+reenviar.").
+
 ### `POST /api/eventos/{id}/cancelar` — cancelamento pela equipe (desde 13/11/2026)
 
 Só ADMINISTRADOR e SECRETARIA; o professor recebe `403`, mesmo no próprio
@@ -628,11 +641,16 @@ O cancelamento não se desfaz. Na mesma transação grava `canceladoEm`,
 `motivoCancelamento` e `canceladoPorId` (a `situacao` continua `APROVADO`) e
 encerra como recusada, com o motivo "Evento cancelado", a proposta de
 alteração pendente. As inscrições **não** são apagadas (ficam no histórico do
-aluno). Depois da transação, cada inscrito e o professor responsável recebem
-o e-mail "Evento cancelado: <título>" com o motivo (contas fictícias não
-recebem; falha de envio fica na auditoria, sem endereço). Auditoria
-`EVENTO_CANCELADO` com o id do evento e quantos inscritos foram avisados,
-nunca o motivo. Resposta `200`: o `Evento` com `avisoInscritos: { inscritos,
+aluno). Depois da transação, a auditoria `EVENTO_CANCELADO` é gravada
+**antes** dos e-mails (com o id do evento e quantos inscritos há para avisar,
+nunca o motivo); depois, cada inscrito e o professor responsável recebem o
+e-mail "Evento cancelado: <título>" com o motivo, em lotes paralelos de 10
+(`utils/lotes.ts`, `Promise.allSettled`: a falha de um envio não interrompe
+os outros nem a resposta). Contas fictícias não recebem; falha de envio fica
+na auditoria (`EMAIL_FALHA`, sem endereço) e o resultado do envio num
+`EMAIL_ENVIADO` ("a N de M inscrito(s)"). O aviso de mudança de sala,
+horário, carga ou palestrante segue o mesmo padrão (a auditoria da mudança
+antes, os e-mails em lotes depois). Resposta `200`: o `Evento` com `avisoInscritos: { inscritos,
 avisados }` e `professorAvisado`.
 
 Todo `Evento` passa a trazer `canceladoEm` (ISO ou `null`) e
@@ -779,11 +797,15 @@ interface ParticipanteNaListagem extends Participante {
 Nunca vêm segredo do 2FA, códigos de recuperação nem hash de senha. Resetar
 o 2FA e desbloquear são só do administrador (ver "Ações sobre a conta").
 
-`GET /api/participantes/alunos?busca=&limite=` — admin/secretaria only. Só
+`GET /api/participantes/alunos?busca=&limite=` — equipe e professor. Só
 os participantes com conta de perfil `ALUNO`, em ordem alfabética, no mesmo
 formato de `Participante` (com `ativo`), buscando no servidor por nome,
-e-mail ou RGM e trazendo no máximo `limite` (padrão 20, até 50). Usada no
-Check-in e na inscrição manual, que buscam enquanto se digita.
+e-mail ou RGM e trazendo no máximo `limite` (padrão 20, até 50; para o
+professor, no máximo 20). Usada no Check-in e na inscrição manual, que buscam
+enquanto se digita. **Desde 16/11/2026 o professor recebe só `{ id, nome,
+rgm }`** de cada aluno: sem e-mail, sem `ativo` e sem `motivoInativacao`
+(visível só para a equipe). Administrador e secretaria recebem tudo, como
+antes.
 
 `PUT /api/participantes/{id}` — admin/secretaria, patch parcial. Usado pra:
 
@@ -863,7 +885,13 @@ nesse evento?" na listagem de eventos, e listar certificados disponíveis
 `{ "participanteId": "pa3", "eventoId": "se2" }`, mesmas regras de conflito
 da autoinscrição (`409 JA_INSCRITO` / `409 EVENTO_LOTADO` / `409
 CONFLITO_DE_HORARIO`). Aluno toma `403` — ele usa o endpoint de
-autoinscrição abaixo, não esse. Aluno inativo: `409 PARTICIPANTE_INATIVO`
+autoinscrição abaixo, não esse. **Última vaga (desde 16/11/2026):** na
+inscrição manual e na autoinscrição, a contagem das vagas e a criação da
+inscrição ficam numa transação com a linha do evento travada (`SELECT ... FOR
+UPDATE`, `criarInscricaoComVaga` em `inscricoes.service.ts`): duas
+inscrições ao mesmo tempo na última vaga esperam uma pela outra, e a segunda
+recebe `409 EVENTO_LOTADO`. O e-mail de confirmação e a auditoria vêm depois
+da transação. Aluno inativo: `409 PARTICIPANTE_INATIVO`
 ("Aluno inativo: não é possível inscrevê-lo em eventos."). A equipe inscreve
 em qualquer evento; o professor, **só nos eventos que ele criou**
 (`eventos.criadoPorId`, desde 12/11/2026): em evento de outro professor ou da
@@ -1080,6 +1108,9 @@ ou se o provedor recusar o destinatário.
   presença do aluno no evento não estiver confirmada (`PRESENTE`); `409
   QUESTIONARIO_JA_APROVADO` (já passou dos 60%); `409
   LIMITE_TENTATIVAS_ATINGIDO` (2 tentativas); `422` se faltar resposta.
+  Desde 16/11/2026 a contagem das tentativas anteriores e a gravação da nova
+  ficam numa transação com a inscrição do aluno travada (`SELECT ... FOR
+  UPDATE`): dois envios ao mesmo tempo gravam só um, e o outro recebe `409`.
 - `GET /api/eventos/{eventoId}/questionario/tentativas` — só aluno, as
   tentativas dele nesse evento.
 - `GET /api/questionario-tentativas` — admin/secretaria, todas as

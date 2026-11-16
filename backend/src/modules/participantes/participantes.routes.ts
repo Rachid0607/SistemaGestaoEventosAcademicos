@@ -3,7 +3,7 @@ import { AppError } from "../../errors/AppError";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { autenticar, autorizar } from "../../middleware/auth";
 import { validarCorpo } from "../../middleware/validate";
-import { participanteComContaParaDTO, participanteParaDTO } from "../../utils/dto";
+import { alunoParaProfessorDTO, participanteComContaParaDTO, participanteParaDTO } from "../../utils/dto";
 import { LIMITE_BUSCA_ALUNOS, LIMITE_MAXIMO_BUSCA_ALUNOS, participantesService } from "./participantes.service";
 import { MENSAGEM_EMAIL_FIXO, participanteUpdateSchema } from "./participantes.schemas";
 
@@ -23,7 +23,8 @@ participantesRouter.get(
     const maximo = req.usuario!.perfil === "PROFESSOR" ? LIMITE_BUSCA_ALUNOS : LIMITE_MAXIMO_BUSCA_ALUNOS;
     const limite = Number.isInteger(limitePedido) && limitePedido > 0 ? Math.min(limitePedido, maximo) : LIMITE_BUSCA_ALUNOS;
     const alunos = await participantesService.listarAlunos(busca, limite);
-    res.json(alunos.map(participanteParaDTO));
+    // o professor recebe so id, nome e RGM; a equipe, tudo como antes
+    res.json(alunos.map(req.usuario!.perfil === "PROFESSOR" ? alunoParaProfessorDTO : participanteParaDTO));
   }),
 );
 

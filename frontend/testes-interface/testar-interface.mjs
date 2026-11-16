@@ -7,6 +7,7 @@
 //   3. backend/:  npx tsx scripts/dados-teste-interface.ts preparar  (contas de teste)
 //   4. aqui:      npm install && npm run testar
 //   5. backend/:  npx tsx scripts/dados-teste-interface.ts limpar
+import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { chromium } from "playwright";
@@ -59,6 +60,21 @@ function questionario() {
 const idAtivo = (page) => page.evaluate(() => document.activeElement?.id || document.activeElement?.getAttribute("name") || "");
 const invalido = async (page, seletor) => (await page.locator(seletor).first().getAttribute("aria-invalid")) === "true";
 const temTexto = async (page, texto) => (await page.getByText(texto, { exact: false }).count()) > 0;
+// a API so aceita evento com data e horario no futuro: o evento "no passado" do teste nasce num horario futuro
+// distante e unico (um dia diferente por chamada, sem conflito de sala) e vai para o passado pelo script de dados do
+// teste (backend/scripts/dados-teste-interface.ts passado), que so roda no SGEA_dev
+const PASTA_BACKEND = fileURLToPath(new URL("../../backend", import.meta.url));
+let diasDeFolga = 0;
+async function criarEventoNoPassado(token, corpo) {
+  diasDeFolga++;
+  const provisorio = new Date(Math.ceil((Date.now() + (500 + diasDeFolga) * 24 * 3600 * 1000) / 3600000) * 3600000).toISOString();
+  const criado = await api("POST", "/eventos", token, { ...corpo, horario: provisorio });
+  if (criado.status !== 201) throw new Error(`criação do evento no passado falhou: ${JSON.stringify(criado.corpo)}`);
+  execFileSync("npx", ["tsx", "scripts/dados-teste-interface.ts", "passado", criado.corpo.id, corpo.horario], { cwd: PASTA_BACKEND, stdio: "pipe", shell: true });
+  criado.corpo.horario = corpo.horario;
+  return criado;
+}
+
 async function entrar(page, email, senha) {
   await page.goto(`${APP}/login`);
   await page.fill("#emailLogin", email);
@@ -409,7 +425,7 @@ try {
   titulo("A / Agenda e certificados do aluno");
   // evento de 4 dias atras (sem cruzar com o "Evento Passado UI" de ontem na mesma sala): o aluno nao se inscreve
   const quatroDiasAtras = new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString();
-  await api("POST", "/eventos", tokenSecretaria, {
+  await criarEventoNoPassado(tokenSecretaria, {
     titulo: `Evento Encerrado UI ${sufixo}`, horario: quatroDiasAtras, salaId: sala.corpo.id, palestranteId: palestrante.corpo.id, tema: "Tema", cargaHoraria: 1, questionario: questionario(),
   });
   // evento futuro com 1 vaga, ja ocupada pelo segundo aluno: aparece em Abertas com "Sem vagas"
@@ -765,7 +781,7 @@ try {
   const tituloReprovado = `Evento Reprovado UI ${sufixo}`;
   // 3 horas atras: o "Evento UI" da aluna comeca daqui a pouco e ela nao pode estar em dois eventos no mesmo horario.
   // A secretaria faz a inscricao retroativa e o check-in continua aberto (vai ate 24 h depois do fim)
-  const eventoReprovado = await api("POST", "/eventos", tokenSecretaria, {
+  const eventoReprovado = await criarEventoNoPassado(tokenSecretaria, {
     titulo: tituloReprovado, horario: new Date(Date.now() - 3 * 3600 * 1000).toISOString(), salaId: salaReprovado.corpo.id, palestranteId: palestrante.corpo.id, tema: "Tema", cargaHoraria: 1, questionario: questionario(),
   });
   const meDaAluna = await api("GET", "/usuarios/me", tokenAluna);
@@ -817,7 +833,7 @@ try {
   titulo("C / Inativação");
   // evento que ja aconteceu: a inscricao do aluno nele tem que sobreviver a inativacao
   const ontem = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const eventoPassado = await api("POST", "/eventos", tokenSecretaria, {
+  const eventoPassado = await criarEventoNoPassado(tokenSecretaria, {
     titulo: `Evento Passado UI ${sufixo}`, horario: ontem, salaId: sala.corpo.id, palestranteId: palestrante.corpo.id, tema: "Tema", cargaHoraria: 1, questionario: questionario(),
   });
   await api("POST", "/inscricoes", tokenSecretaria, { participanteId: cadastro2.corpo.participanteId, eventoId: eventoPassado.corpo.id });

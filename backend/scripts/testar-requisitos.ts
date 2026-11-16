@@ -185,6 +185,22 @@ async function main() {
     return r.corpo.token as string;
   }
 
+  // a API so aceita evento com data e horario no futuro (e so aprova evento que ainda nao comecou): o evento "no
+  // passado" dos testes nasce num horario futuro distante e unico (um dia diferente por chamada, sem conflito de
+  // sala), e aprovado nesse horario quando pedido, e so depois vai para o passado direto no banco
+  let diasDeFolga = 0;
+  async function criarEventoNoPassado(token: string | undefined, corpo: Record<string, unknown>, opcoes: { aprovarCom?: string } = {}): Promise<Resposta> {
+    diasDeFolga++;
+    const horarioDesejado = new Date(String(corpo.horario));
+    const provisorio = new Date(Math.ceil((Date.now() + (500 + diasDeFolga) * 24 * 3600 * 1000) / 3600000) * 3600000);
+    const resposta = await chamar("POST", "/eventos", { token, corpo: { ...corpo, horario: provisorio.toISOString() } });
+    if (resposta.status !== 201) return resposta;
+    if (opcoes.aprovarCom) await chamar("POST", `/eventos/${resposta.corpo.id}/aprovar`, { token: opcoes.aprovarCom });
+    await prisma.evento.update({ where: { id: resposta.corpo.id }, data: { horario: horarioDesejado } });
+    resposta.corpo.horario = horarioDesejado.toISOString();
+    return resposta;
+  }
+
   try {
     const admin = await criarEquipeHashAntigo("ADMINISTRADOR");
     const secretaria = await criarEquipeHashAntigo("SECRETARIA");
@@ -625,10 +641,7 @@ async function main() {
     r = await chamar("POST", `/eventos/${eventoId}/inscricoes`, { token: secretaria.token });
     checar("equipe não usa a autoinscrição -> 403", r.status === 403, r.status);
     // evento de 4 dias atras, fora do horario dos outros eventos passados da mesma sala (sem conflito de sala)
-    r = await chamar("POST", "/eventos", {
-      token: admin.token,
-      corpo: { ...eventoBase, titulo: `Evento Encerrado ${sufixo}`, horario: emHoras(emBreve, -120), questionario: questionario() },
-    });
+    r = await criarEventoNoPassado(admin.token, { ...eventoBase, titulo: `Evento Encerrado ${sufixo}`, horario: emHoras(emBreve, -120), questionario: questionario() });
     const eventoEncerradoId: string = r.corpo.id;
     eventos.push(eventoEncerradoId);
     r = await chamar("POST", `/eventos/${eventoEncerradoId}/inscricoes`, { token: aluno.token });
@@ -694,9 +707,12 @@ async function main() {
     checar("inscrição com check-in pedido não é cancelada pelo aluno -> 409 CHECKIN_JA_SOLICITADO", r.status === 409 && r.corpo.code === "CHECKIN_JA_SOLICITADO", r.corpo);
     r = await chamar("DELETE", `/inscricoes/${inscricaoAluno2}`, { token: secretaria.token });
     checar("nem pela equipe -> 409 CHECKIN_JA_SOLICITADO", r.status === 409 && r.corpo.code === "CHECKIN_JA_SOLICITADO", r.corpo);
-    r = await chamar("POST", "/eventos", {
-      token: admin.token,
-      corpo: { ...eventoBase, titulo: `Evento Iniciado ${sufixo}`, salaId: salaPequenaId, horario: emHoras(emBreve, -72), questionario: questionario() },
+    r = await criarEventoNoPassado(admin.token, {
+      ...eventoBase,
+      titulo: `Evento Iniciado ${sufixo}`,
+      salaId: salaPequenaId,
+      horario: emHoras(emBreve, -72),
+      questionario: questionario(),
     });
     const eventoIniciadoId: string = r.corpo.id;
     eventos.push(eventoIniciadoId);
@@ -1122,10 +1138,7 @@ async function main() {
     // aluno 2 tem: inscricao PRESENTE no evento principal (futuro) e PENDENTE no evento lotado (futuro);
     // ganha mais uma PENDENTE num evento que ja aconteceu
     const ontem = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-    r = await chamar("POST", "/eventos", {
-      token: admin.token,
-      corpo: { titulo: `Evento Passado ${sufixo}`, horario: ontem, salaId, palestranteId, tema: "Tema", cargaHoraria: 1, questionario: questionario() },
-    });
+    r = await criarEventoNoPassado(admin.token, { titulo: `Evento Passado ${sufixo}`, horario: ontem, salaId, palestranteId, tema: "Tema", cargaHoraria: 1, questionario: questionario() });
     const eventoPassadoId: string = r.corpo.id;
     eventos.push(eventoPassadoId);
     r = await chamar("POST", "/inscricoes", { token: secretaria.token, corpo: { participanteId: aluno2.participanteId, eventoId: eventoPassadoId } });
@@ -1356,10 +1369,8 @@ async function main() {
       alunosOcupacao.push(participanteOcupacao.id);
     }
     const criarEventoNaSala = async (titulo: string, horario: Date, sala: string) => {
-      const resposta = await chamar("POST", "/eventos", {
-        token: admin.token,
-        corpo: { titulo: `${titulo} ${sufixo}`, horario: horario.toISOString(), salaId: sala, palestranteId, tema: "Tema", cargaHoraria: 2, questionario: questionario() },
-      });
+      const corpo = { titulo: `${titulo} ${sufixo}`, horario: horario.toISOString(), salaId: sala, palestranteId, tema: "Tema", cargaHoraria: 2, questionario: questionario() };
+      const resposta = horario.getTime() <= Date.now() ? await criarEventoNoPassado(admin.token, corpo) : await chamar("POST", "/eventos", { token: admin.token, corpo });
       eventos.push(resposta.corpo.id);
       return resposta.corpo.id as string;
     };
@@ -1818,9 +1829,11 @@ async function main() {
     checar("dashboard de outro professor não conta esse evento", r.status === 200 && r.corpo.totais.eventos === 0, r.corpo?.totais);
 
     requisito("R38 Evento encerrado não é editado nem excluído");
-    r = await chamar("POST", "/eventos", {
-      token: admin.token,
-      corpo: { ...corpoEventoProf, titulo: `Evento Encerrado Trava ${sufixo}`, palestranteId, horario: new Date(Date.now() - (3 * 24 + 6) * 3600 * 1000).toISOString() },
+    r = await criarEventoNoPassado(admin.token, {
+      ...corpoEventoProf,
+      titulo: `Evento Encerrado Trava ${sufixo}`,
+      palestranteId,
+      horario: new Date(Date.now() - (3 * 24 + 6) * 3600 * 1000).toISOString(),
     });
     const eventoTravadoId: string = r.corpo.id;
     eventos.push(eventoTravadoId);
@@ -1969,9 +1982,9 @@ async function main() {
       r.corpo,
     );
     // evento do professor que ja comecou (comecou ha 1 h, dura 3 h)
-    r = await chamar("POST", "/eventos", {
-      token: professorA.token,
-      corpo: {
+    r = await criarEventoNoPassado(
+      professorA.token,
+      {
         ...corpoEventoProf,
         titulo: `Evento Em Andamento ${sufixo}`,
         salaId: salaMinusculaId,
@@ -1979,10 +1992,10 @@ async function main() {
         horario: new Date(Date.now() - 3600000).toISOString(),
         cargaHoraria: 3,
       },
-    });
+      { aprovarCom: secretaria.token },
+    );
     const eventoEmAndamentoId: string = r.corpo.id;
     eventos.push(eventoEmAndamentoId);
-    await chamar("POST", `/eventos/${eventoEmAndamentoId}/aprovar`, { token: secretaria.token });
     r = await chamar("PUT", `/eventos/${eventoEmAndamentoId}`, { token: professorA.token, corpo: { cargaHoraria: 4 } });
     checar("proposta em evento que já começou -> 409 EVENTO_JA_INICIADO", r.status === 409 && r.corpo.code === "EVENTO_JA_INICIADO", r.corpo);
 
@@ -2038,15 +2051,12 @@ async function main() {
     checar("o mesmo questionário de volta (sem mudança) não bloqueia a edição do resto -> 200", r.status === 200 && r.corpo.tema === "Tema revisado", r.corpo);
 
     requisito("R42 Inativação do professor com transferência dos eventos");
-    r = await chamar("POST", "/eventos", {
-      token: professorA.token,
-      corpo: {
-        ...corpoEventoProf,
-        titulo: `Evento Antigo do Professor ${sufixo}`,
-        salaId: salaMinusculaId,
-        palestranteId: palestranteProfId,
-        horario: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
-      },
+    r = await criarEventoNoPassado(professorA.token, {
+      ...corpoEventoProf,
+      titulo: `Evento Antigo do Professor ${sufixo}`,
+      salaId: salaMinusculaId,
+      palestranteId: palestranteProfId,
+      horario: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
     });
     const eventoAntigoId: string = r.corpo.id;
     eventos.push(eventoAntigoId);
@@ -3684,7 +3694,8 @@ async function main() {
       await chamar("POST", `/eventos/${eventoPendente}/recusar`, { token: secretaria.token, corpo: { motivo: "Falta a ementa do evento" } });
       r = await chamar("POST", `/eventos/${eventoPendente}/cancelar`, { token: secretaria.token, corpo: { motivo: "Motivo suficiente aqui" } });
       checar("evento recusado também não -> 409", r.status === 409 && r.corpo.code === "EVENTO_NAO_APROVADO", r.corpo);
-      const eventoIniciado = await criarEvento(admin.token!, "Evento Ja Iniciado", salaPassado, new Date(Date.now() - 3600000));
+      const eventoIniciado = await criarEvento(admin.token!, "Evento Ja Iniciado", salaPassado, new Date(inicioR51.getTime() + 10 * 24 * 3600000));
+      await prisma.evento.update({ where: { id: eventoIniciado }, data: { horario: new Date(Date.now() - 3600000) } });
       r = await chamar("POST", `/eventos/${eventoIniciado}/cancelar`, { token: secretaria.token, corpo: { motivo: "Motivo suficiente aqui" } });
       checar("evento que já começou não é cancelado -> 409", r.status === 409 && r.corpo.message === "Não é possível cancelar um evento que já começou.", r.corpo);
       const eventoDoAdmin = await criarEvento(secretaria.token!, "Evento Cancelado pelo Admin", salaAdmin, new Date(inicioR51.getTime() + 2 * 24 * 3600000));
@@ -3733,11 +3744,20 @@ async function main() {
       );
       const proposta = await prisma.propostaAlteracao.findFirst({ where: { eventoId: eventoE } });
       checar("a proposta de alteração pendente vira recusada, com o motivo \"Evento cancelado\"", proposta?.situacao === "RECUSADO" && proposta.motivoRecusa === "Evento cancelado", proposta);
+      // o cancelamento e auditado ANTES dos e-mails (com quantos inscritos ha para avisar); o resultado do envio vem
+      // depois, num EMAIL_ENVIADO
       const logCancelamento = await prisma.logAuditoria.findFirst({ where: { acao: "EVENTO_CANCELADO", detalhe: { contains: eventoE } } });
+      const logEnvio = await prisma.logAuditoria.findFirst({ where: { acao: "EMAIL_ENVIADO", detalhe: { contains: `cancelamento do evento ${eventoE}` } } });
       checar(
-        "a auditoria registra o cancelamento com o id e os avisados, sem o texto do motivo",
-        !!logCancelamento?.detalhe && logCancelamento.detalhe.includes("2 de 2") && !logCancelamento.detalhe.includes("Palestrante doente"),
-        logCancelamento?.detalhe,
+        "a auditoria registra o cancelamento antes dos e-mails (id e inscritos a avisar) e o envio depois (2 de 2), sem o texto do motivo",
+        !!logCancelamento?.detalhe &&
+          logCancelamento.detalhe.includes("3 inscrito(s) a avisar") &&
+          !logCancelamento.detalhe.includes("Palestrante doente") &&
+          !!logEnvio?.detalhe &&
+          logEnvio.detalhe.includes("2 de 2") &&
+          !logEnvio.detalhe.includes("Palestrante doente") &&
+          logCancelamento.criadoEm.getTime() <= logEnvio.criadoEm.getTime(),
+        [logCancelamento?.detalhe, logEnvio?.detalhe],
       );
       r = await chamar("POST", `/eventos/${eventoE}/cancelar`, { token: secretaria.token, corpo: { motivo: MOTIVO } });
       checar("evento já cancelado não é cancelado de novo -> 409", r.status === 409 && r.corpo.code === "EVENTO_CANCELADO", r.corpo);
@@ -3809,6 +3829,143 @@ async function main() {
       checar("a proposta encerrada pelo cancelamento não entra no aviso de recusa do professor", r.status === 200 && r.corpo.eventosRecusados === 1, r.corpo);
     }
 
+    // ------------------------------------------------------------------ correcoes da revisao final
+    requisito("R52 Busca de alunos do professor, última vaga e questionário sem corrida, evento só no futuro");
+    {
+      const professorF: Conta = { id: randomUUID(), email: `req.prof.f.${sufixo}@umc.br`, senha: SENHA_PROFESSOR, perfil: "PROFESSOR", participanteId: null };
+      await prisma.usuario.create({
+        data: {
+          id: professorF.id,
+          nome: "Professor Revisao F",
+          emailLogin: professorF.email,
+          senhaHash: await bcrypt.hash(SENHA_PROFESSOR, 4),
+          perfil: "PROFESSOR",
+          consentimentoLgpdEm: new Date(),
+          versaoTermosAceitos: VERSAO_TERMOS_ATUAL,
+        },
+      });
+      contas.push(professorF);
+      professorF.token = await entrar(professorF);
+      const [alunoS1, alunoS2, alunoS3, alunoS4] = [await criarAlunoCheckin("S1"), await criarAlunoCheckin("S2"), await criarAlunoCheckin("S3"), await criarAlunoCheckin("S4")];
+
+      // busca de alunos: o professor recebe so id, nome e RGM; a equipe, tudo como antes
+      r = await chamar("GET", `/participantes/alunos?busca=${encodeURIComponent("Aluno Check-in S1")}`, { token: professorF.token });
+      const doProfessor = (r.corpo ?? []).find((a: { id: string }) => a.id === alunoS1.participanteId);
+      checar(
+        "professor buscando aluno recebe só id, nome e RGM (sem e-mail, situação nem motivo de inativação)",
+        r.status === 200 && !!doProfessor && Object.keys(doProfessor).sort().join(",") === "id,nome,rgm",
+        doProfessor,
+      );
+      r = await chamar("GET", `/participantes/alunos?busca=${encodeURIComponent("Aluno Check-in S1")}`, { token: secretaria.token });
+      const daEquipe = (r.corpo ?? []).find((a: { id: string }) => a.id === alunoS1.participanteId);
+      checar(
+        "a equipe continua recebendo e-mail e situação do aluno",
+        r.status === 200 && daEquipe?.email === alunoS1.email && daEquipe?.ativo === true && "motivoInativacao" in daEquipe,
+        daEquipe,
+      );
+
+      // regra da criacao (commit 3ac6873): ninguem cria evento no passado
+      const salaR52 = await chamar("POST", "/salas", { token: secretaria.token, corpo: { nome: codigoDeSala(), tipo: "SALA_DE_AULA", capacidade: 1 } });
+      salas.push(salaR52.corpo.id);
+      const corpoR52 = (titulo: string, horario: Date) => ({
+        titulo: `${titulo} ${sufixo}`,
+        horario: horario.toISOString(),
+        salaId: salaR52.corpo.id,
+        palestranteId,
+        tema: "Revisão",
+        cargaHoraria: 1,
+        questionario: questionario(),
+      });
+      r = await chamar("POST", "/eventos", { token: secretaria.token, corpo: corpoR52("Evento no Passado", new Date(Date.now() - 3600000)) });
+      checar(
+        "criar evento com data e horário que já passaram -> 422 no campo horario",
+        r.status === 422 && (r.corpo?.erros ?? []).some((e: { campo: string }) => e.campo === "horario"),
+        r.corpo,
+      );
+
+      // ultima vaga: duas inscricoes ao mesmo tempo, so uma entra (sala de 1 lugar)
+      const inicioR52 = new Date(Math.ceil((Date.now() + 40 * 24 * 3600 * 1000) / 3600000) * 3600000);
+      r = await chamar("POST", "/eventos", { token: secretaria.token, corpo: corpoR52("Evento Ultima Vaga", inicioR52) });
+      const eventoUltimaVaga: string = r.corpo.id;
+      eventos.push(eventoUltimaVaga);
+      const simultaneas = await Promise.all([
+        chamar("POST", `/eventos/${eventoUltimaVaga}/inscricoes`, { token: alunoS1.token }),
+        chamar("POST", `/eventos/${eventoUltimaVaga}/inscricoes`, { token: alunoS2.token }),
+      ]);
+      const status = simultaneas.map((s) => s.status).sort();
+      checar(
+        "duas autoinscrições simultâneas na última vaga: só uma entra, a outra recebe EVENTO_LOTADO",
+        status.join(",") === "201,409" &&
+          simultaneas.some((s) => s.corpo?.code === "EVENTO_LOTADO") &&
+          (await prisma.inscricao.count({ where: { eventoId: eventoUltimaVaga } })) === 1,
+        simultaneas.map((s) => [s.status, s.corpo?.code]),
+      );
+      r = await chamar("POST", "/eventos", { token: secretaria.token, corpo: corpoR52("Evento Ultima Vaga Manual", new Date(inicioR52.getTime() + 3 * 3600000)) });
+      const eventoUltimaVagaManual: string = r.corpo.id;
+      eventos.push(eventoUltimaVagaManual);
+      const manuais = await Promise.all([
+        chamar("POST", "/inscricoes", { token: secretaria.token, corpo: { participanteId: alunoS3.participanteId, eventoId: eventoUltimaVagaManual } }),
+        chamar("POST", "/inscricoes", { token: admin.token, corpo: { participanteId: alunoS4.participanteId, eventoId: eventoUltimaVagaManual } }),
+      ]);
+      checar(
+        "duas inscrições manuais simultâneas na última vaga: só uma entra, a outra recebe EVENTO_LOTADO",
+        manuais.map((s) => s.status).sort().join(",") === "201,409" &&
+          manuais.some((s) => s.corpo?.code === "EVENTO_LOTADO") &&
+          (await prisma.inscricao.count({ where: { eventoId: eventoUltimaVagaManual } })) === 1,
+        manuais.map((s) => [s.status, s.corpo?.code]),
+      );
+
+      // questionario: na 2a tentativa, dois envios ao mesmo tempo gravam so um
+      const inscritoNaVaga = simultaneas[0].status === 201 ? alunoS1 : alunoS2;
+      await prisma.inscricao.updateMany({ where: { eventoId: eventoUltimaVaga, participanteId: inscritoNaVaga.participanteId! }, data: { statusPresenca: "PRESENTE" } });
+      await prisma.tentativaQuestionario.create({
+        data: {
+          id: randomUUID(),
+          participanteId: inscritoNaVaga.participanteId!,
+          eventoId: eventoUltimaVaga,
+          respostas: Array(10).fill(3),
+          acertos: 0,
+          totalPerguntas: 10,
+          percentual: 0,
+        },
+      });
+      const envios = await Promise.all([
+        chamar("POST", `/eventos/${eventoUltimaVaga}/questionario/respostas`, { token: inscritoNaVaga.token, corpo: { respostas: Array(10).fill(3) } }),
+        chamar("POST", `/eventos/${eventoUltimaVaga}/questionario/respostas`, { token: inscritoNaVaga.token, corpo: { respostas: Array(10).fill(3) } }),
+      ]);
+      const tentativasGravadas = await prisma.tentativaQuestionario.count({ where: { eventoId: eventoUltimaVaga, participanteId: inscritoNaVaga.participanteId! } });
+      checar(
+        "dois envios simultâneos do questionário na 2ª tentativa: só um é gravado, o outro recebe LIMITE_TENTATIVAS_ATINGIDO",
+        envios.map((e) => e.status).sort().join(",") === "201,409" &&
+          envios.some((e) => e.corpo?.code === "LIMITE_TENTATIVAS_ATINGIDO") &&
+          tentativasGravadas === 2,
+        { envios: envios.map((e) => [e.status, e.corpo?.code]), tentativasGravadas },
+      );
+
+      // evento pendente cujo horario ja passou: nem aprova nem reenvia
+      r = await chamar("POST", "/eventos", { token: professorF.token, corpo: corpoR52("Evento Pendente Vencido", new Date(inicioR52.getTime() + 6 * 3600000)) });
+      const eventoPendenteVencido: string = r.corpo.id;
+      eventos.push(eventoPendenteVencido);
+      await prisma.evento.update({ where: { id: eventoPendenteVencido }, data: { horario: new Date(Date.now() - 30 * 60 * 1000), cargaHoraria: 2 } });
+      r = await chamar("POST", `/eventos/${eventoPendenteVencido}/aprovar`, { token: secretaria.token });
+      checar(
+        "aprovar evento pendente cujo horário já passou -> 409",
+        r.status === 409 && r.corpo.code === "EVENTO_JA_INICIADO" && (await prisma.evento.findUnique({ where: { id: eventoPendenteVencido } }))?.situacao === "PENDENTE",
+        r.corpo,
+      );
+      r = await chamar("POST", "/eventos", { token: professorF.token, corpo: corpoR52("Evento Recusado Vencido", new Date(inicioR52.getTime() + 9 * 3600000)) });
+      const eventoRecusadoVencido: string = r.corpo.id;
+      eventos.push(eventoRecusadoVencido);
+      await chamar("POST", `/eventos/${eventoRecusadoVencido}/recusar`, { token: secretaria.token, corpo: { motivo: "Falta a ementa do evento" } });
+      await prisma.evento.update({ where: { id: eventoRecusadoVencido }, data: { horario: new Date(Date.now() - 30 * 60 * 1000), cargaHoraria: 2 } });
+      r = await chamar("POST", `/eventos/${eventoRecusadoVencido}/reenviar`, { token: professorF.token, corpo: {} });
+      checar(
+        "reenviar evento recusado cujo horário já passou -> 409",
+        r.status === 409 && r.corpo.code === "EVENTO_JA_INICIADO" && (await prisma.evento.findUnique({ where: { id: eventoRecusadoVencido } }))?.situacao === "RECUSADO",
+        r.corpo,
+      );
+    }
+
     // ------------------------------------------------------------------ RF009/RNF010: exclusao bloqueada
     requisito("R19 Exclusão de evento bloqueada com inscrições (RF009/RNF010)");
     r = await chamar("DELETE", `/eventos/${eventoId}`, { token: admin.token });
@@ -3835,6 +3992,12 @@ async function main() {
     checar("evento sem inscrição é excluído -> 204", r.status === 204 && !(await prisma.evento.findUnique({ where: { id: eventoSemInscricaoId } })), r.corpo);
     eventos.splice(eventos.indexOf(eventoSemInscricaoId), 1);
   } finally {
+    // ids vazios (algo que nao chegou a ser criado porque o teste falhou antes) saem das listas: a limpeza nunca quebra
+    const soIds = (lista: (string | undefined | null)[]) => lista.filter((id): id is string => typeof id === "string" && id.length > 0);
+    eventos.splice(0, eventos.length, ...soIds(eventos));
+    salas.splice(0, salas.length, ...soIds(salas));
+    palestrantes.splice(0, palestrantes.length, ...soIds(palestrantes));
+    contas.splice(0, contas.length, ...contas.filter((c) => typeof c.id === "string" && c.id.length > 0));
     // certificado segura a inscricao (onDelete: Restrict), entao sai antes dos eventos e das inscricoes
     const participantesDoTeste = contas.map((c) => c.participanteId).filter((id): id is string => !!id);
     await prisma.certificado.deleteMany({

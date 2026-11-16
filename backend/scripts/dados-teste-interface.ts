@@ -4,6 +4,9 @@
 // como rodar (de dentro de backend/):
 //   npx tsx scripts/dados-teste-interface.ts preparar   -> cria administrador e secretaria de teste
 //   npx tsx scripts/dados-teste-interface.ts limpar     -> apaga tudo que o teste criou (logs ficam)
+//   npx tsx scripts/dados-teste-interface.ts passado <id do evento> <horario ISO>
+//                                                       -> move um evento do teste para o passado (a API so cria
+//                                                          evento no futuro; o teste cria no futuro e chama este)
 //
 // as credenciais de teste vao pra frontend/testes-interface/dados-ui.json (fora do git)
 import "dotenv/config";
@@ -103,7 +106,20 @@ async function main() {
       return;
     }
 
-    console.error("[dados-teste-interface] uso: npx tsx scripts/dados-teste-interface.ts preparar|limpar");
+    // move para o passado um evento criado pelo teste (o titulo tem o sufixo da rodada): a API so aceita evento
+    // com data e horario no futuro, entao o teste de interface cria no futuro e chama este comando
+    if (acao === "passado") {
+      const [eventoId, horario] = [process.argv[3], process.argv[4]];
+      const quando = new Date(horario ?? "");
+      const { sufixo } = JSON.parse(readFileSync(ARQUIVO, "utf8")) as { sufixo: string };
+      if (!eventoId || Number.isNaN(quando.getTime())) throw new Error("uso: passado <id do evento> <horario ISO>");
+      const { count } = await prisma.evento.updateMany({ where: { id: eventoId, titulo: { contains: sufixo } }, data: { horario: quando } });
+      if (count !== 1) throw new Error("evento do teste não encontrado");
+      console.log(`[dados-teste-interface] evento movido para ${quando.toISOString()}`);
+      return;
+    }
+
+    console.error("[dados-teste-interface] uso: npx tsx scripts/dados-teste-interface.ts preparar|limpar|passado <id> <horario ISO>");
     process.exitCode = 1;
   } finally {
     await prisma.$disconnect();

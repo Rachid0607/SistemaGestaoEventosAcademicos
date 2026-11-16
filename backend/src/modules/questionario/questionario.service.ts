@@ -47,21 +47,6 @@ async function responder(eventoId: string, participanteId: string, dados: Respos
     throw AppError.validacao("Responda todas as perguntas do questionário antes de enviar.");
   }
 
-  const tentativasAnteriores = await prisma.tentativaQuestionario.findMany({ where: { eventoId, participanteId } });
-  const jaAprovado = atingiuNotaMinima(tentativasAnteriores.map((t) => t.percentual));
-  if (jaAprovado) {
-    throw AppError.conflito(
-      "QUESTIONARIO_JA_APROVADO",
-      "Você já atingiu a nota mínima neste questionário e não pode refazê-lo.",
-    );
-  }
-  if (tentativasAnteriores.length >= MAX_TENTATIVAS_QUESTIONARIO) {
-    throw AppError.conflito(
-      "LIMITE_TENTATIVAS_ATINGIDO",
-      `Você já utilizou as ${MAX_TENTATIVAS_QUESTIONARIO} tentativas permitidas para este questionário.`,
-    );
-  }
-
   const totalPerguntas = questionario.length;
   const acertos = questionario.reduce((total, pergunta, indice) => {
     const alternativa = pergunta.alternativas[dados.respostas[indice]];
@@ -69,16 +54,36 @@ async function responder(eventoId: string, participanteId: string, dados: Respos
   }, 0);
   const percentual = totalPerguntas > 0 ? Math.round((acertos / totalPerguntas) * 100) : 0;
 
-  const tentativa = await prisma.tentativaQuestionario.create({
-    data: {
-      id: randomUUID(),
-      participanteId,
-      eventoId,
-      respostas: dados.respostas,
-      acertos,
-      totalPerguntas,
-      percentual,
-    },
+  // tentativas anteriores conferidas e tentativa nova gravada juntas, com a inscricao do aluno travada (SELECT ...
+  // FOR UPDATE): dois envios ao mesmo tempo esperam um pelo outro, e o segundo ja ve a tentativa do primeiro. As
+  // tentativas tambem sao lidas com trava: no TiDB a leitura comum enxerga a foto do inicio da transacao
+  const tentativa = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM inscricoes WHERE participanteId = ${participanteId} AND eventoId = ${eventoId} FOR UPDATE`;
+    const tentativasAnteriores = await tx.$queryRaw<{ percentual: number }[]>`SELECT percentual FROM tentativas_questionario WHERE eventoId = ${eventoId} AND participanteId = ${participanteId} FOR UPDATE`;
+    const jaAprovado = atingiuNotaMinima(tentativasAnteriores.map((t) => t.percentual));
+    if (jaAprovado) {
+      throw AppError.conflito(
+        "QUESTIONARIO_JA_APROVADO",
+        "Você já atingiu a nota mínima neste questionário e não pode refazê-lo.",
+      );
+    }
+    if (tentativasAnteriores.length >= MAX_TENTATIVAS_QUESTIONARIO) {
+      throw AppError.conflito(
+        "LIMITE_TENTATIVAS_ATINGIDO",
+        `Você já utilizou as ${MAX_TENTATIVAS_QUESTIONARIO} tentativas permitidas para este questionário.`,
+      );
+    }
+    return tx.tentativaQuestionario.create({
+      data: {
+        id: randomUUID(),
+        participanteId,
+        eventoId,
+        respostas: dados.respostas,
+        acertos,
+        totalPerguntas,
+        percentual,
+      },
+    });
   });
   await registrarAuditoria(
     atorId,

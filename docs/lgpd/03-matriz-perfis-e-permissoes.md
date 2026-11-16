@@ -63,12 +63,12 @@ id vindo da tela.
 | `/api/eventos?de=&ate=` (calendário) | GET | ✅ | ✅ | ✅ | — | Equipe: tudo completo. Professor: os dele completos; os dos outros que ocupam sala (aprovados, pendentes e propostas pendentes) só como sala, início e fim — sem título, palestrante, inscritos nem id. O aluno recebe a programação de sempre |
 | `/api/eventos/busca` | GET | ✅ | ✅ | só os dele | ❌ | Título, tema, palestrante ou sala, com limite (máx. 50) |
 | `/api/eventos/:id` | GET | ✅ | ✅ | só os dele | só aprovados | `404` fora do escopo |
-| `/api/eventos` | POST | ✅ | ✅ | ✅ | ❌ | Da equipe nasce aprovado; do professor, pendente (já reserva a sala) |
+| `/api/eventos` | POST | ✅ | ✅ | ✅ | ❌ | Só com data e horário no futuro (`422` no campo `horario`; desde 14/11/2026). Da equipe nasce aprovado; do professor, pendente (já reserva a sala) |
 | `/api/eventos/:id` | PUT | ✅ | ✅ | só os dele | ❌ | Evento encerrado: `409`. Professor em evento aprovado: sala, horário, carga e palestrante viram proposta de alteração. Questionário com tentativa de aluno: `409 QUESTIONARIO_TRAVADO` |
 | `/api/eventos/:id` | DELETE | ✅ | ✅ | só os dele | ❌ | Só evento sem inscrição e não encerrado |
-| `/api/eventos/:id/aprovar`, `/recusar` | POST | ✅ | ✅ | ❌ | ❌ | Recusa exige motivo |
+| `/api/eventos/:id/aprovar`, `/recusar` | POST | ✅ | ✅ | ❌ | ❌ | Recusa exige motivo. Aprovar evento cujo horário de início já passou: `409 EVENTO_JA_INICIADO` |
 | `/api/eventos/:id/cancelar` | POST | ✅ | ✅ | ❌ | ❌ | Desde 13/11/2026. Só evento APROVADO, ainda não iniciado e não cancelado; motivo de 10 a 500 caracteres (`422` fora disso). Já iniciado: `409 EVENTO_JA_INICIADO`; pendente ou recusado: `409 EVENTO_NAO_APROVADO`; já cancelado: `409 EVENTO_CANCELADO`. Não se desfaz. Encerra a proposta pendente como recusada, libera a sala, mantém as inscrições e avisa por e-mail os inscritos e o professor responsável; auditoria `EVENTO_CANCELADO` sem o motivo. O professor recebe `403`, mesmo no próprio evento |
-| `/api/eventos/:id/reenviar` | POST | ✅ | ✅ | só os dele | ❌ | Evento recusado volta a pendente |
+| `/api/eventos/:id/reenviar` | POST | ✅ | ✅ | só os dele | ❌ | Evento recusado volta a pendente; com o horário de início já passado, `409 EVENTO_JA_INICIADO` |
 | `/api/eventos/:id/historico` | GET | ✅ | ✅ | só os dele | ❌ | Histórico da aprovação |
 | `/api/eventos/:id/proposta` | PUT | ❌ | ❌ | só os dele | ❌ | Corrige a proposta pendente ou reenvia a recusada |
 | `/api/eventos/:id/proposta` | DELETE | ✅ | ✅ | só os dele | ❌ | Cancela a proposta |
@@ -90,7 +90,7 @@ id vindo da tela.
 | `/api/palestrantes/:id/historico` | GET | ✅ | ✅ | só os dele | ❌ | — |
 | `/api/palestrantes/:id/aprovar`, `/recusar`, `/proposta/aprovar`, `/proposta/recusar` | POST | ✅ | ✅ | ❌ | ❌ | — |
 | `/api/palestrantes/:id` | DELETE | ✅ | ✅ | ❌ | ❌ | Só palestrante já decidido (aprovado ou recusado): aguardando aprovação → `409 PALESTRANTE_PENDENTE` ("Aprove ou recuse este palestrante antes de excluir."); com proposta de alteração aguardando → `409 PROPOSTA_PENDENTE`; com evento → `409 CONFLITO_DEPENDENCIA` |
-| `/api/participantes/alunos` | GET | ✅ | ✅ | ✅ | ❌ | Busca de aluno para a inscrição manual, no máximo 20 resultados |
+| `/api/participantes/alunos` | GET | ✅ | ✅ | ✅ | ❌ | Busca de aluno para a inscrição manual, no máximo 20 resultados. O professor recebe só id, nome e RGM (sem e-mail, situação nem motivo de inativação; desde 16/11/2026) |
 | `/api/participantes`, `/:id` | GET | ✅ | ✅ | ❌ | ❌ | Lista com a situação da conta (ativa, 2FA, bloqueio), sem segredo nem hash |
 | `/api/participantes/:id` | PUT | ✅ | ✅ | ❌ | ❌ | Corrige nome e RGM (o e-mail não muda: `422`); inativar exige motivo, encerra as sessões e cancela as inscrições sem pedido de check-in em eventos futuros; reativar apaga o motivo |
 | `/api/participantes/:id` | DELETE | ✅ | ✅ | ❌ | ❌ | Só aluno já inativo e sem certificado (`409 PARTICIPANTE_COM_CERTIFICADO`) |

@@ -281,7 +281,8 @@ entra e circula no sistema.
 - **O que o professor vê dos alunos:** só nos eventos que ele criou: nome,
   RGM, situação do check-in e notas do questionário. Ele não acessa
   certificados, avaliações, a tela Participantes nem a lista geral de alunos
-  (a busca para inscrição manual devolve no máximo 20 resultados).
+  (a busca para inscrição manual devolve no máximo 20 resultados, e só o
+  nome e o RGM de cada aluno: sem e-mail nem situação da conta).
 - **O que o professor vê dos outros eventos:** no calendário
   (`GET /api/eventos?de=&ate=`), os eventos de outros professores e da
   equipe que ocupam uma sala chegam só como sala, início e fim ("Sala

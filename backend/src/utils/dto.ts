@@ -86,6 +86,12 @@ export function participanteParaDTO(participante: Participante) {
   };
 }
 
+// busca de aluno feita pelo PROFESSOR (inscricao manual nos eventos dele): so o necessario para escolher o aluno.
+// Sem e-mail, sem a situacao da conta e sem o motivo da inativacao (visivel so para a equipe)
+export function alunoParaProfessorDTO(participante: Participante) {
+  return { id: participante.id, nome: participante.nome, rgm: participante.rgm };
+}
+
 // linha da tela Participantes: o participante + a situacao da conta dele. Lista campo a campo de
 // proposito: segredo do 2FA, codigos de recuperacao e hash de senha nunca entram aqui
 export function participanteComContaParaDTO(participante: Participante & SituacaoConta) {

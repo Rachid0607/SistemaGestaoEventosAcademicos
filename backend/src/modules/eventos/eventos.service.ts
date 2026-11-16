@@ -3,11 +3,17 @@ import { Prisma, type Evento as EventoDb, type PropostaAlteracao as PropostaDb, 
 import { prisma } from "../../db/prisma";
 import { AppError } from "../../errors/AppError";
 import { emailService, type MudancaEvento } from "../email/email.service";
-import { enviarConfirmacaoPorEmail, garantirSemConflitoDeHorario, paraDominio as paraDominioInscricao } from "../inscricoes/inscricoes.service";
+import {
+  criarInscricaoComVaga,
+  enviarConfirmacaoPorEmail,
+  garantirSemConflitoDeHorario,
+  paraDominio as paraDominioInscricao,
+} from "../inscricoes/inscricoes.service";
 import { COM_CONTA_DO_ALUNO, paraDominio as participanteParaDominio } from "../participantes/participantes.service";
 import { listarHistorico, registrarHistorico } from "../aprovacoes/aprovacoes.service";
 import { camposInformados, registrarAuditoria } from "../../utils/auditoria";
 import { rotuloSala } from "../../utils/salas";
+import { emLotes, TAMANHO_LOTE_EMAIL } from "../../utils/lotes";
 import { env } from "../../config/env";
 import { ehEquipe, eventoDoAtorOuFalhar, eventoEncerrado, eventosVisiveis, garantirEventoNaoCancelado, palestrantesVisiveis, type Ator } from "../../utils/escopo";
 import type { Evento, PerguntaQuestionario, PropostaEvento } from "../../types/domain";
@@ -389,37 +395,37 @@ function textoDasMudancas(mudancas: MudancaEvento[]): string {
   return mudancas.map((m) => `${m.rotulo}: ${m.antes} → ${m.depois}`).join("; ");
 }
 
-// avisa por e-mail cada inscrito de um evento aprovado que mudou de sala, horario, carga ou palestrante.
-// Falha de envio nao desfaz a mudanca: vai para a auditoria (sem dado pessoal, so o id da inscricao)
+// avisa por e-mail cada inscrito de um evento aprovado que mudou de sala, horario, carga ou palestrante. A auditoria
+// da mudanca ja foi gravada antes (por quem chama); os e-mails saem em lotes paralelos (utils/lotes.ts). Falha de
+// envio nao desfaz a mudanca: vai para a auditoria (sem dado pessoal, so o id da inscricao)
 async function avisarInscritos(eventoId: string, eventoTitulo: string, mudancas: MudancaEvento[], atorId: string) {
   if (mudancas.length === 0) return { inscritos: 0, avisados: 0 };
   const inscricoes = await prisma.inscricao.findMany({
     where: { eventoId },
     select: { id: true, participante: { include: COM_CONTA_DO_ALUNO } },
   });
+  const destinatarios = inscricoes
+    .map((inscricao) => ({ inscricaoId: inscricao.id, participante: participanteParaDominio(inscricao.participante) }))
+    .filter((d) => Boolean(d.participante.email));
+  const resultados = await emLotes(destinatarios, TAMANHO_LOTE_EMAIL, (d) =>
+    emailService.enviarAlteracaoEvento(d.participante.email!, { participanteNome: d.participante.nome, eventoTitulo, mudancas }),
+  );
   let avisados = 0;
   let simulado = false;
   // inscrito de conta ficticia sai da lista (nao recebe e nao conta); os reais continuam recebendo
   let suprimidos = 0;
-  for (const inscricao of inscricoes) {
-    const participante = participanteParaDominio(inscricao.participante);
-    if (!participante.email) continue;
-    try {
-      const resultado = await emailService.enviarAlteracaoEvento(participante.email, {
-        participanteNome: participante.nome,
-        eventoTitulo,
-        mudancas,
-      });
-      if (resultado === "suprimido") {
-        suprimidos++;
-        continue;
-      }
-      avisados++;
-      if (resultado === "simulado") simulado = true;
-    } catch {
+  for (const [i, resultado] of resultados.entries()) {
+    if (resultado.status === "rejected") {
       // email.service.ts ja loga o detalhe sanitizado da falha
-      await registrarAuditoria(atorId, "EMAIL_FALHA", `aviso de alteração do evento ${eventoId}, inscrição ${inscricao.id}: falha no envio`);
+      await registrarAuditoria(atorId, "EMAIL_FALHA", `aviso de alteração do evento ${eventoId}, inscrição ${destinatarios[i].inscricaoId}: falha no envio`);
+      continue;
     }
+    if (resultado.value === "suprimido") {
+      suprimidos++;
+      continue;
+    }
+    avisados++;
+    if (resultado.value === "simulado") simulado = true;
   }
   if (avisados > 0) {
     await registrarAuditoria(
@@ -714,9 +720,16 @@ async function eventoPendenteOuFalhar(id: string) {
   return evento;
 }
 
-// aprova: confere de novo o conflito de sala e se o palestrante ja esta APROVADO
+// aprova: confere de novo o conflito de sala e se o palestrante ja esta APROVADO. Evento cujo horario de inicio ja
+// passou nao e aprovado (mesma regra da criacao: evento so com data e horario no futuro)
 async function aprovar(id: string, ator: Ator) {
   const evento = await eventoPendenteOuFalhar(id);
+  if (evento.horario.getTime() <= Date.now()) {
+    throw AppError.conflito(
+      "EVENTO_JA_INICIADO",
+      "Não é possível aprovar: o horário de início deste evento já passou. Recuse-o para o professor ajustar a data.",
+    );
+  }
   if (evento.palestrante.situacao !== "APROVADO") {
     throw AppError.conflito(
       "PALESTRANTE_NAO_APROVADO",
@@ -750,6 +763,13 @@ async function reenviar(id: string, resposta: string | undefined, ator: Ator) {
     throw AppError.conflito("EVENTO_NAO_RECUSADO", "Só é possível reenviar um evento que foi recusado.");
   }
   if (eventoEncerrado(evento)) throw erroEncerrado();
+  // mesma regra da criacao: so volta para aprovacao com data e horario no futuro
+  if (evento.horario.getTime() <= Date.now()) {
+    throw AppError.conflito(
+      "EVENTO_JA_INICIADO",
+      "Não é possível reenviar: o horário de início deste evento já passou. Altere a data e o horário antes de reenviar.",
+    );
+  }
   await validarConflitoDeSala(evento.salaId, evento.horario, evento.cargaHoraria, id);
   await prisma.evento.update({ where: { id }, data: { situacao: "PENDENTE", motivoRecusa: null } });
   await registrarHistorico("EVENTO", id, "REENVIADO", ator.id, resposta);
@@ -788,14 +808,8 @@ async function autoinscrever(eventoId: string, participanteId: string, atorId: s
   }
   await garantirSemConflitoDeHorario(participanteId, evento, "ALUNO");
 
-  const ocupadas = await prisma.inscricao.count({ where: { eventoId } });
-  if (ocupadas >= evento.sala.capacidade) {
-    throw AppError.conflito("EVENTO_LOTADO", "Evento sem vagas disponíveis.");
-  }
-
-  const inscricao = await prisma.inscricao.create({
-    data: { id: randomUUID(), participanteId, eventoId, statusPresenca: "PENDENTE" },
-  });
+  // vaga conferida e inscricao criada juntas, com o evento travado (ultima vaga disputada)
+  const inscricao = await criarInscricaoComVaga(eventoId, participanteId, evento.sala.capacidade);
   await registrarAuditoria(
     atorId,
     "INSCRICAO_CRIADA",
@@ -854,48 +868,64 @@ async function cancelar(id: string, motivo: string, ator: Ator) {
     linkEventos: env.appUrl ? `${env.appUrl}/#/eventos` : null,
   };
   const inscricoes = await prisma.inscricao.findMany({ where: { eventoId: id }, select: { id: true, participante: { include: COM_CONTA_DO_ALUNO } } });
-  let avisados = 0;
-  let suprimidos = 0;
-  let simulado = false;
-  for (const inscricao of inscricoes) {
-    const participante = participanteParaDominio(inscricao.participante);
-    if (!participante.email) continue;
-    try {
-      const resultado = await emailService.enviarCancelamentoEvento(participante.email, { ...dados, nome: participante.nome, destinatario: "INSCRITO" });
-      if (resultado === "suprimido") {
-        suprimidos++;
-        continue;
-      }
-      avisados++;
-      if (resultado === "simulado") simulado = true;
-    } catch {
-      // email.service.ts ja loga o detalhe sanitizado da falha
-      await registrarAuditoria(ator.id, "EMAIL_FALHA", `aviso de cancelamento do evento ${id}, inscrição ${inscricao.id}: falha no envio`);
-    }
-  }
-  let professorAvisado = false;
-  if (evento.criadoPor) {
-    try {
-      const resultado = await emailService.enviarCancelamentoEvento(evento.criadoPor.emailLogin, {
-        ...dados,
-        nome: evento.criadoPor.nome,
-        destinatario: "PROFESSOR",
-      });
-      professorAvisado = resultado !== "suprimido";
-      if (resultado === "simulado") simulado = true;
-    } catch {
-      await registrarAuditoria(ator.id, "EMAIL_FALHA", `aviso de cancelamento do evento ${id} ao professor responsável: falha no envio`);
-    }
-  }
-  const inscritosReais = inscricoes.length - suprimidos;
-  // o motivo e texto livre: fica so no evento (e no historico da aprovacao), nunca na auditoria
+  // a auditoria do cancelamento vai ANTES dos e-mails: se o envio demorar ou falhar, o cancelamento ja esta registrado.
+  // O motivo e texto livre: fica so no evento (e no historico da aprovacao), nunca na auditoria
   await registrarAuditoria(
     ator.id,
     "EVENTO_CANCELADO",
-    `evento ${id}: ${avisados} de ${inscritosReais} inscrito(s) avisado(s) por e-mail${professorAvisado ? ", e o professor responsável" : ""}` +
-      `${propostasPendentes.length > 0 ? `; ${propostasPendentes.length} proposta(s) de alteração encerrada(s)` : ""}` +
-      `${simulado ? " (simulado: SendGrid não configurado)" : ""}`,
+    `evento ${id}: ${inscricoes.length} inscrito(s) a avisar por e-mail${evento.criadoPor ? ", e o professor responsável" : ""}` +
+      `${propostasPendentes.length > 0 ? `; ${propostasPendentes.length} proposta(s) de alteração encerrada(s)` : ""}`,
   );
+
+  // e-mails em lotes paralelos (utils/lotes.ts): os inscritos e o professor responsavel, cada um com o seu texto
+  const destinatarios: { inscricaoId: string | null; email: string; nome: string; tipo: "INSCRITO" | "PROFESSOR" }[] = [];
+  for (const inscricao of inscricoes) {
+    const participante = participanteParaDominio(inscricao.participante);
+    if (participante.email) destinatarios.push({ inscricaoId: inscricao.id, email: participante.email, nome: participante.nome, tipo: "INSCRITO" });
+  }
+  if (evento.criadoPor) {
+    destinatarios.push({ inscricaoId: null, email: evento.criadoPor.emailLogin, nome: evento.criadoPor.nome, tipo: "PROFESSOR" });
+  }
+  const resultados = await emLotes(destinatarios, TAMANHO_LOTE_EMAIL, (d) =>
+    emailService.enviarCancelamentoEvento(d.email, { ...dados, nome: d.nome, destinatario: d.tipo }),
+  );
+  let avisados = 0;
+  let suprimidos = 0;
+  let simulado = false;
+  let professorAvisado = false;
+  for (const [i, resultado] of resultados.entries()) {
+    const destino = destinatarios[i];
+    if (resultado.status === "rejected") {
+      // email.service.ts ja loga o detalhe sanitizado da falha
+      await registrarAuditoria(
+        ator.id,
+        "EMAIL_FALHA",
+        destino.tipo === "PROFESSOR"
+          ? `aviso de cancelamento do evento ${id} ao professor responsável: falha no envio`
+          : `aviso de cancelamento do evento ${id}, inscrição ${destino.inscricaoId}: falha no envio`,
+      );
+      continue;
+    }
+    if (resultado.value === "simulado") simulado = true;
+    if (destino.tipo === "PROFESSOR") {
+      professorAvisado = resultado.value !== "suprimido";
+      continue;
+    }
+    if (resultado.value === "suprimido") {
+      suprimidos++;
+      continue;
+    }
+    avisados++;
+  }
+  const inscritosReais = inscricoes.length - suprimidos;
+  if (avisados > 0 || professorAvisado) {
+    await registrarAuditoria(
+      ator.id,
+      "EMAIL_ENVIADO",
+      `aviso de cancelamento do evento ${id} a ${avisados} de ${inscritosReais} inscrito(s)${professorAvisado ? " e ao professor responsável" : ""}` +
+        `${simulado ? " (simulado: SendGrid não configurado)" : ""}`,
+    );
+  }
   return { evento: await recarregar(id), avisoInscritos: { inscritos: inscritosReais, avisados }, professorAvisado };
 }
 
